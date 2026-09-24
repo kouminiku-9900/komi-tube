@@ -94,7 +94,14 @@ function(komi_program name title)
         COMMENT "Generating ${name}.prx for PSPLink")
 
     # EBOOT: same sources, packed for the Memory Stick. MEMSIZE=1 is patched
-    # in by scripts/package.py's set_pbp_title when it is installed.
+    # in by scripts/package.py's set_pbp_title when it is installed. Strip it
+    # first (keeping .unstripped symbols), as the browser EBOOT does: this
+    # preset is MinSizeRel, which the SDK's own strip step skips.
+    add_custom_command(TARGET ${name}-elf POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy "${out}/${name}-elf.elf"
+            "${out}/${name}-elf.elf.unstripped"
+        COMMAND "${PSPDEV}/bin/psp-strip" "${out}/${name}-elf.elf"
+        COMMENT "Stripping ${name} (keeping .unstripped symbols)")
     create_pbp_file(TARGET ${name}-elf TITLE "${title}" OUTPUT_DIR "${out}")
 endfunction()
 
