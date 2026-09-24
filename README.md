@@ -88,8 +88,30 @@ SDK、SDKが必要とするMac用共有ライブラリ、PPSSPPは `tools/` に�
 
 `build.sh` はPSPのコードサイズ検査と第三者ライセンス収録の検査を通してからパッケージを生成します。コンパイラはPSP用の `ar` / `ranlib` を明示し、Mac用のアーカイバーが混ざるのを防ぎます。
 
-## 出典・ライセンス
+## ありがとう
 
-[上流ソース](https://github.com/stjanovitz/tilefinch) / [YouTube実装の説明](https://github.com/stjanovitz/tilefinch/blob/main/docs/engineering/YOUTUBE_VIDEO_LAB.md) / [PSPDEV](https://github.com/pspdev/pspdev) / [PPSSPP](https://github.com/hrydgard/ppsspp)
+komi-tubeがPSP単体でYouTubeにつながり、動画を再生できるのは、[Steven Janovitz](https://github.com/stjanovitz)さんが作った **[Tilefinch](https://github.com/stjanovitz/tilefinch)** のおかげです。PSPで動くブラウザーそのものから、HTTPS通信、YouTubeの動画情報の取得、PSPのメディアエンジンを使ったデコードまで、このアプリの土台はほぼすべてTilefinchの成果です。「今のYouTubeをPSPで見る」という無茶を現実にしてくれたことに、心から感謝します。YouTube対応の仕組みは [Tilefinchの解説](https://github.com/stjanovitz/tilefinch/blob/main/docs/engineering/YOUTUBE_VIDEO_LAB.md) に詳しくまとまっています。
 
-このリポジトリ独自のスクリプト・アイコンはMITライセンスです。PSP本体側のコード（`vendor/tilefinch/`）は [Tilefinch](https://github.com/stjanovitz/tilefinch)（MIT、© Steven Janovitz）を取り込んで変更したものです。上流ソースとその依存ライブラリはそれぞれのライセンスに従います。配布ZIPには上流のライセンスと第三者通知を収録します。YouTube、Sony、元のGoTube開発者とは無関係の非公式プロジェクトです。
+かつてPSPでYouTubeを見せてくれたGoTubeと、その作者の方にも感謝します。komi-tubeはその思い出から始まった、非公式の作り直しです（GoTubeの公式な後継ではありません）。
+
+ほかにも、Lexbor、QuickJS、curl、mbed TLS、nghttp2、FreeType、libwebpなどのライブラリの作者の皆さん、フォントの作者の皆さん、[PSPDEV](https://github.com/pspdev/pspdev)（PSPSDK）を今も保守しているコミュニティの皆さん、開発に使わせてもらった [PPSSPP](https://github.com/hrydgard/ppsspp) の皆さんに感謝します。
+
+縦持ちでショートを見る派生版の [dopagaki-portable](https://github.com/kouminiku-9900/dopagaki-portable) も、このリポジトリから生まれました。
+
+## ライセンス
+
+- **このリポジトリで書いたコード・スクリプト・アイコン**：MITライセンスです（[LICENSE](LICENSE)）。
+- **Tilefinch**（`vendor/tilefinch/`）：MITライセンス（© 2026 Steven Janovitz）。PSP向けに手を入れたものを取り込んでいます。元のライセンスは [vendor/tilefinch/LICENSE](vendor/tilefinch/LICENSE)、同梱ライブラリの一覧は [vendor/tilefinch/THIRD_PARTY_NOTICES.md](vendor/tilefinch/THIRD_PARTY_NOTICES.md) にあります。
+- **同梱しているライブラリ**は、MIT・BSD・Apache-2.0・FreeTypeライセンス・SIL OFL 1.1（フォント）などの、自由に配布できるライセンスのものです。PSPのSDKに含まれるpthread-embeddedはLGPL-2.1以降です。このアプリのソースコードとビルド手順はすべてこのリポジトリで公開しているので、差し替えたライブラリでビルドし直すことができます。
+- **アプリ本体（EBOOT）にはGPLのコードを含んでいません。** CFWの機能を呼び出す部分も、GPLのSDKではなく、Tilefinchが自前で書いたMITの宣言を使っています。
+- 例外は `OPTIONAL/tilefinch_xmb.prx`（入れたい人だけが使う、XMBから起動するためのプラグイン）です。これはCFWのSDK（GPL-3.0）を使っているため、**このファイルだけはGPL-3.0として配布**しています。ソースは [vendor/tilefinch/src/psp_xmb_redirect.c](vendor/tilefinch/src/psp_xmb_redirect.c) で公開していて、ライセンス文は配布ZIPの `NOTICES/pspdev/psp-cfw-sdk/` にあります。
+- 配布ZIPの `NOTICES` フォルダに、ライセンス文と第三者通知をすべて入れています。
+
+## 免責事項
+
+- komi-tubeは個人が趣味で作った**非公式**のソフトです。YouTube、Google、ソニーグループ、Tilefinchの作者、GoTubeの作者とは一切関係がなく、各社・各作者の承認も受けていません。YouTube、PSP、PlayStationは各社の商標です。
+- **無保証です。** このソフトを使ったこと、または使えなかったことによって生じたいかなる損害（本体の故障や起動不能、データの消失、通信費などを含みます）についても、作者は責任を負いません。すべて自己責任でお使いください。
+- CFW（カスタムファームウェア）の導入はこのリポジトリの対象外です。導入方法の案内やファイルの配布は行いません。
+- 非公式のアプリからYouTubeを見ることが、YouTubeの利用規約に沿っているかどうかは保証できません。ご自身で判断したうえでお使いください。動画のダウンロードや再配布、有料・会員限定コンテンツを見るための回避には使わないでください。表示される動画の権利は、それぞれの投稿者にあります。
+- YouTube側の仕組みが変わると、予告なく動かなくなることがあります。動作やサポートの継続は約束できません。
+- アプリは、アカウント情報やAPIキーを使いません。ただし、検索語（新しいアプリでひらがなを入力した場合はGoogleの変換サービスにも）はインターネットに送られます。
