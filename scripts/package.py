@@ -14,8 +14,13 @@ SOURCE = ROOT / 'vendor/tilefinch/build-preset-psp/tilefinch-install/Tilefinch'
 DIST = ROOT / 'dist'
 NAME = 'KOMI_TUBE'
 
-def set_pbp_title(path: Path, title: str, icon: bytes):
-    """Set the public title and replace the upstream launcher icon."""
+# MEMSIZE=1 is the only value that unlocks the extra ~28 MB on the tested
+# PSP-3000 CFW; the SDK default of 2 leaves the app at 22.6 MB
+# (docs/field-results/2026-09-24-memprobe-v1 and -v2).
+MEMSIZE = 1
+
+def set_pbp_title(path: Path, title: str, icon: bytes, memsize: int = MEMSIZE):
+    """Set the public title and MEMSIZE, and replace the upstream launcher icon."""
     data = path.read_bytes()
     magic, version, *offsets = struct.unpack_from('<10I', data)
     if magic != 0x50425000 or len(offsets) != 8:
@@ -28,6 +33,7 @@ def set_pbp_title(path: Path, title: str, icon: bytes):
         raise ValueError('Invalid PARAM.SFO')
     records, keys, values = [], bytearray(), bytearray()
     found = False
+    memsize_found = False
     for i in range(count):
         key_offset, kind, length, capacity, value_offset = struct.unpack_from('<HHIII', sfo, 20 + i * 16)
         key = sfo[key_start + key_offset:].split(b'\0', 1)[0]
@@ -35,12 +41,19 @@ def set_pbp_title(path: Path, title: str, icon: bytes):
         if key == b'TITLE':
             value = title.encode('utf-8') + b'\0'
             found = True
+        elif key == b'MEMSIZE':
+            if kind != 0x0404 or length != 4:
+                raise ValueError('Unexpected MEMSIZE entry in PARAM.SFO')
+            value = struct.pack('<I', memsize)
+            memsize_found = True
         size = (max(len(value), capacity) + 3) & ~3
         records.append(struct.pack('<HHIII', len(keys), kind, len(value), size, len(values)))
         keys.extend(key + b'\0')
         values.extend(value + bytes(size - len(value)))
     if not found:
         raise ValueError('No TITLE in PARAM.SFO')
+    if not memsize_found:
+        raise ValueError('No MEMSIZE in PARAM.SFO')
     ks = 20 + 16 * count
     vs = (ks + len(keys) + 3) & ~3
     parts[0] = struct.pack('<5I', smagic, sversion, ks, vs, count) + b''.join(records) + keys + bytes(vs - ks - len(keys)) + values

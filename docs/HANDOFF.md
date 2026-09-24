@@ -53,7 +53,20 @@ python vendor/tilefinch/tests/test_psp_sdk_contracts.py vendor/tilefinch   # ソ
   - ME専用6MBは3種類とも`0x08C00000-0x09200000`（4MB境界）に確保できた。MEMSIZE=1でのアリーナは`0x09300000-0x0BA80000`（39.5MB、うち26.5MBが拡張領域）。
   - 揮発メモリ（`0x08400000`、4MB）はユーザーモードからロックできた。
   - AAC作業領域は`CheckNeedMem`で**100744バイト**を要求（tilefinchのプールは64KB想定）。v1は32KBを上限にしていたためMEの試験が実行されず、全項目FAILはこのためで、MEの可否は未確定。v2で上限256KBに修正。
-  - 残り：v2を1回実行してMEの可視範囲を確定する。installed komi-tube EBOOTのMEMSIZEもv2のログに出る（2なら今のkomi-tubeは実機で拡張メモリを使えていない）。
+- **実機結果 v2（同日、m1のみ、`docs/field-results/2026-09-24-memprobe-v2/`）**
+  - AACデコード（作業領域100744バイト）は、低位・揮発メモリ・入出力だけ高位・全部高位のすべてで24/24成功し、出力は完全に一致した。10回の開閉も10/10で、パーティションの漏れは0。**この実機ではMEは`0x0A000000`より上も読み書きできる**（少なくともsceAudiocodecでは）。tilefinchの「MEは拡張領域を読めない」という前提は、AACについては成り立たない。H.264（mpeg_vsh）は未検証。
+  - 実機に入っていたkomi-tubeのEBOOTは**MEMSIZE=2**だった。つまり今のkomi-tubeは実機で22.6MBしか使えていなかった（2本目以降のメモリ不足の背景）。`scripts/package.py`でMEMSIZE=1に書き換えるよう変更した（PPSSPPで、書き換えたEBOOTが拡張メモリを得ることを確認済み）。**実機での効果は未確認**。
+- **確定したメモリ割り当て（MEMSIZE=1、PSP-3000）**
+  | 領域 | 範囲 | 大きさ |
+  |---|---|---|
+  | プログラム・newlib・モジュール | `0x08800000-0x089C5B00` | 約1.8MB（調査EBOOT。本番は大きくなる） |
+  | 空き（低位） | `0x089C5B00-0x08C00000` | 約2.2MB |
+  | ME専用領域 | `0x08C00000-0x09200000` | 6MB（4MB境界。DDR 2MBを先頭に） |
+  | 予備 | `0x09200000-0x09300000` | 1MB |
+  | 汎用アリーナ | `0x09300000-0x0BA80000` | 39.5MB（うち26.5MBが拡張領域） |
+  | メインスレッドのスタックなど | `0x0BA80000-0x0BB00000` | 約0.5MB |
+  - 起動時の空きは49.6MB、AV・netモジュールと初期化で約644KB減る。AAC作業領域は約98KB要る。
+  - MEが高位も読めるので、ME領域を低位に固定するのは保険として残す（低位には余裕がある）。リングバッファからデコーダーへの入力はコピーなしで渡せる見込み。H.264の高位読み取りは、段階1の再生EBOOTの試験項目に入れて次の持ち出しで確認する。
 - 実機テストは持ち出しを減らすため1回にまとめる：`docs/FIELD-TEST.md`。`./scripts/field_sync.sh install|collect` でコピーと回収、`scripts/memprobe_report.py` で表にする。
 - Linuxでもビルドできる：pspdevのUbuntu版（`pspdev-ubuntu-latest-x86_64.tar.gz`、sources.lock.jsonと同じv20260901）を展開し、`PSPDEV=<展開先>/pspdev ./scripts/build_memprobe.sh`。
 
