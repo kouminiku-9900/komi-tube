@@ -125,3 +125,8 @@ include(cmake/TilefinchCore.cmake)
 include(cmake/TilefinchTargets.cmake)
 include(cmake/PspSwdec.cmake)
 include(cmake/TilefinchTests.cmake)
+
+# komi-tube: extra targets (the browser-less player) built against this tree.
+if(KOMI_EXTRA_CMAKE)
+    include("${KOMI_EXTRA_CMAKE}")
+endif()

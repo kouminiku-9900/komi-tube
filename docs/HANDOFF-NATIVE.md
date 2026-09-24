@@ -24,7 +24,7 @@ tilefinch（PSP向けブラウザ）にYouTubeを表示させる今の構成か�
 |---|---|---|---|
 | 0前半 | メモリ配置の実測 | **完了** | 済 |
 | 0後半 | 部品を`derived/`へ切り出し、`net/http.h`を定義 | 未着手 | 不要 |
-| 1 | ブラウザなしの再生EBOOT（OSKで動画ID → `yt/resolver` → `media/Player`）、`profiles.cfg`の外部化 | 未着手 | 1回（10本連続再生） |
+| 1 | ブラウザなしの再生EBOOT（OSKで動画ID → `yt/resolver` → `media/Player`）、`profiles.cfg`の外部化 | **一部完了**：10本連続再生は実機で合格（下記）。H.264の拡張領域試験、OSK入口、`profiles.cfg`は未 | 済（PSPLink） |
 | 2 | HTTPの自前化（mbedTLS＋curlを直接、Range、gzip、リダイレクト、キャンセル） | 未着手 | 1回目か3回目に同乗 |
 | 3 | ネイティブ画面（検索→結果（サムネイル）→再生、GU＋intraFont、JSONはストリーミングで読む） | 未着手 | 1回（操作感はユーザーが判断） |
 | 4 | 関連動画、設定、字幕、履歴、スリープ復帰、PSP goの`ef0:` | 未着手 | 3回目に同乗できるかも |
@@ -44,6 +44,30 @@ tilefinch（PSP向けブラウザ）にYouTubeを表示させる今の構成か�
 - **H.264（mpeg_vsh / sceMpeg）が拡張領域（`0x0A000000`以上）のバッファを読めるか**の試験を同じEBOOTに入れる。AACは読めた（下記）が、H.264は未確認。
 - `yt/resolver`は既存の`vendor/tilefinch/src/youtube_resolver.c`（クライアント設定、フォーマット選択、STSキャッシュ）から移植する。`yt/`とdemuxは、Mac上の実通信テストとfixtureテストの両方を用意する。
 - 合格ライン：実機で10本連続再生して、確保失敗も断片化も起きないこと。
+
+## 段階1の現状（2026-09-24）
+
+順番を変えた：部品の`derived/`への切り出し（段階0後半）より先に、**tilefinchをライブラリとしてそのままリンクし、ブラウザを通さず再生部分だけを動かす**試験プログラムを作った。再生部分（`psp_media_session`ほか約1.2万行）はブラウザ本体と深く結びついていて、切り出す前に「ブラウザなしで動く」ことを実機で確かめる方が安全なため。
+
+- `native/player/main.c`：`komi-player`。起動すると`komi-videos.txt`の動画を順に開き、30秒（または最後まで）再生して閉じ、1本ごとの結果を`komi-player.txt`に書く。ボタン操作なし。120秒進まなければ見張りスレッドが終了させる。描画はtilefinchのソフトウェア拡大（Sharp相当）を16bit画面へ。
+- `native/player/player.cmake`：`vendor/tilefinch/CMakeLists.txt`末尾の`KOMI_EXTRA_CMAKE`フックから読み込まれ、ブラウザと同じ`tilefinch_core`と通信ライブラリにリンクする。PRX（PSPLink用）とEBOOTの両方を出す。
+- `scripts/build_player.sh`（ビルドのみ）、`scripts/run_player.sh`（ビルド→PSPLinkで起動→終了を待ってログを`field-logs/player-<日時>/`へ）。前回の実行がまだ動いていれば終わるまで待つ。
+- **結果：10本すべて合格**（`docs/field-results/2026-09-24-player-v1/report.md`）。最初の映像まで2.2〜5.2秒、読み込み待ち0、ヒープのピーク8.8MB、4本目以降の増加は1本あたり数KB。
+
+tilefinchをブラウザなしで動かすときに要ったこと（次に同じことをする人向け）：
+
+- **通信の許可**：`fetch_background_transport_set_admission(true)`を呼ばないと、すべての通信が「transport admission timed out (network-rejoin)」で拒否される。ブラウザはネットワークの状態管理が準備完了を報告したときにこれを開ける。
+- **Wi-Fi**：ダイアログなしの`psp_network_begin`＋`psp_network_pump`で接続できる。ただし保存設定のうち今いる場所で届くもの（このPSPでは7番）を選ぶ必要がある。`komi-player`は保存設定を全部列挙し、前回成功した番号（`komi-wifi.txt`）から順に試す。`config/boot.cfg`の`network_profile=1`は届かない設定だった。
+- **ログ**：リリース設定では`psp_log_*`がマクロで空になり、`src/psp_log.c`も空関数になる。`TILEFINCH_PSP_VALIDATION_LOG`を全体に付けると`tilefinch_core`と構造体の形がずれる（`media_backend.h`、`psp_display.h`、`psp_ui.h`に条件付きのメンバーがある）。そこで`TILEFINCH_PSP_LOG_IMPLEMENTATION=1`を付け、`psp_log.c`だけを有効化した版（`native/player/psp_log_enabled.c`）をコンパイルしている。`tilefinch_core`の`printf`は`--wrap=printf`で同じログへ流す。
+- **メモリの測り方**：`PSP_HEAP_SIZE_KB(-1)`で区画全体をnewlibが最初に取るため、`sceKernelTotalFreeMemSize`は常に約2.3MBしか示さない。実際の使用量は`mallinfo().uordblks`で見る。
+- 画質の要求は360pにしているが、失敗時の詳細には`quality=240`と出る（空きメモリの見積もりが`sceKernelTotalFreeMemSize`基準のためと思われる）。成功時の実際の解像度はまだ記録していない。次の版で記録する。
+
+段階1で残っていること：
+
+1. **H.264が拡張領域のバッファを読めるか**の試験（`komi-player`に追加するか、memprobe v3）。
+2. 再生中の実際の解像度・itag・音声の途切れを結果行に出す。空きメモリの見積もりをヒープ基準に直して360pが選ばれるか確かめる。
+3. OSKで動画IDを入れる手動確認用の入口、`profiles.cfg`の外部化。
+4. その後に段階0後半（`derived/`への切り出しと`net/http.h`）。`komi-player`がリンクしている範囲が、切り出すべき部品の一覧になる。
 
 ## 検証の方針（2026-09-24、ユーザーと合意）
 
