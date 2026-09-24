@@ -1,4 +1,5 @@
 #include "tilefinch/psp_media_session.h"
+#include <psppower.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -2680,11 +2681,31 @@ static bool psp_media_start_pending_preview_commit(
     return true;
 }
 
+/*
+ * komi-tube: watching a video presses no buttons, so without this the
+ * firmware's backlight-dim, backlight-off and auto-sleep timers run out in
+ * the middle of playback. Report activity about once a second while a video
+ * is visibly playing or buffering; paused or closed players let them run.
+ */
+static void psp_media_keep_awake(const PspMediaSession *media)
+{
+    static uint64_t last_tick_us;
+    if (!media->ui.visible || media->ui.failed || media->ui.ended
+        || (!media->ui.playing && !media->ui.buffering
+            && !media->ui.resolving)) return;
+    uint64_t now_us = psp_media_now_us(media);
+    if (last_tick_us != 0 && now_us - last_tick_us < UINT64_C(1000000))
+        return;
+    last_tick_us = now_us;
+    (void) scePowerTick(PSP_POWER_TICK_ALL);
+}
+
 bool psp_media_advance(
     PspMediaSession *media, unsigned elapsed_ms,
     const TilefinchCancellation *cancellation)
 {
     if (media == NULL) return false;
+    psp_media_keep_awake(media);
     psp_media_session_checkpoint(media, "advance-begin");
     /* Before anything else this frame: a decoded slot may be held by a
        transfer nobody is tracking, and every path below assumes the ownership
