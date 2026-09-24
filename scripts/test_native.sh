@@ -1,0 +1,28 @@
+#!/bin/sh
+# Mac-side tests for native/ (no PSP needed).
+#   scripts/test_native.sh            fixture tests only (offline)
+#   scripts/test_native.sh --live     also search YouTube for real
+# Links the host build of tilefinch (vendor/tilefinch/build-preset-release).
+set -eu
+PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+TF="$PROJECT_ROOT/vendor/tilefinch"
+OUT="$PROJECT_ROOT/build/native-tests"
+mkdir -p "$OUT"
+cc -std=c11 -O1 -Wall -Wextra -o "$OUT/search_probe" \
+    -I"$TF/include" -I"$PROJECT_ROOT/native/app" \
+    "$PROJECT_ROOT/native/tests/search_probe.c" \
+    "$PROJECT_ROOT/native/app/yt_results.c" \
+    -L"$TF/build-preset-release" -ltilefinch_core \
+    -Wl,-rpath,"$TF/build-preset-release"
+cc -std=c11 -O1 -Wall -Wextra -o "$OUT/mylist_test" \
+    -I"$PROJECT_ROOT/native/app" \
+    "$PROJECT_ROOT/native/tests/mylist_test.c" "$PROJECT_ROOT/native/app/mylist.c"
+"$OUT/mylist_test" "$OUT/mylist-test.txt"
+for fixture in "$PROJECT_ROOT"/native/tests/fixtures/*.html; do
+    [ -f "$fixture" ] || continue
+    printf '%s: ' "$(basename "$fixture")"
+    "$OUT/search_probe" --file "$fixture" | tail -1
+done
+if [ "${1:-}" = "--live" ]; then
+    "$OUT/search_probe" "${2:-猫}" "$OUT/last-search.html"
+fi
