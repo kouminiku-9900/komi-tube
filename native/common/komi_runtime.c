@@ -329,9 +329,8 @@ static bool connect_network(void)
     size_t count = 0;
     for (int profile = 1; profile <= 10; profile++) {
         if (!psp_network_profile_is_saved(profile)) continue;
-        char ssid[40] = {0};
-        (void) psp_network_profile_ssid(profile, ssid, sizeof ssid);
-        komi_result("wifi-profile %d ssid=\"%s\"", profile, ssid);
+        /* Only the number: logs get shared, access point names should not. */
+        komi_result("wifi-profile %d saved", profile);
         if (profile == remembered && count > 0) {
             profiles[count++] = profiles[0];
             profiles[0] = profile;
