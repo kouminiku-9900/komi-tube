@@ -44,6 +44,12 @@ python vendor/tilefinch/tests/test_psp_sdk_contracts.py vendor/tilefinch   # ソ
 - HLS（ライブ）で `HLS master has no compatible 240p AVC rendition` が一度出たが原因未特定（ホストのパーサーは実マスターを正しく処理）。今は失敗時に変種一覧をエラーに残す。
 - 通常heapは約9〜11MB（PPSSPP実測、拡張メモリ未使用と推定）で、プール確保後の残りは少ない。
 
+## ネイティブクライアントへの作り替え（2026-09-24〜）
+- 方針：tilefinch（ブラウザ）を使わないネイティブクライアントへ段階的に移行する。作業は本リポジトリのブランチで行い、tilefinch版のビルドと実機ログの手順をそのまま使う。
+- 段階0：メモリ調査用EBOOT `native/memprobe/`（`./scripts/build_memprobe.sh` → `dist/field-kit/PSP/GAME/KOMI_PROBE_M0/M1/M2`）。MEMSIZE別のユーザー領域、`0x0A000000`上下の空き、モジュール読み込み後の空き、ME専用6MB（4MB境界）とアリーナの配置、AACデコードによるMEの可視範囲、10回の開閉を1回の起動で記録する。PPSSPP headlessで3種類とも完走を確認済み。**実機未確認**。
+- 実機テストは持ち出しを減らすため1回にまとめる：`docs/FIELD-TEST.md`。`./scripts/field_sync.sh install|collect` でコピーと回収、`scripts/memprobe_report.py` で表にする。
+- Linuxでもビルドできる：pspdevのUbuntu版（`pspdev-ubuntu-latest-x86_64.tar.gz`、sources.lock.jsonと同じv20260901）を展開し、`PSPDEV=<展開先>/pspdev ./scripts/build_memprobe.sh`。
+
 ## 次の方針候補
 - 実機で「検索→再生→関連→再生」の反復を確認し、エラー履歴の heap-largest を見る。
 - なお不足なら：HTML/CSSエンジンを使わない**ネイティブ画面**（検索結果・詳細をJSONから直接描画）への作り直しを提案済み（大工事、実機反復が必要）。
