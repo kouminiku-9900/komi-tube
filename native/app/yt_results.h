@@ -35,6 +35,11 @@ typedef struct {
 size_t yt_parse_cards(const char *html, size_t length, YtVideo *videos,
                       size_t limit);
 
+/* The "Load more results" link youtube_lite puts after a search page
+   (<a class=more href="...tilefinch_token=...">), unescaped. Returns 0 when
+   the page has none. */
+int yt_more_url(const char *html, size_t length, char *url, size_t size);
+
 /* https://m.youtube.com/results?search_query=<UTF-8, percent-encoded>.
    Returns 0 when the query is empty or does not fit. */
 int yt_search_url(const char *query, char *url, size_t size);

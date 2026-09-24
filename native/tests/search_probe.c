@@ -1,12 +1,15 @@
 /* Mac-side check of the search path the native app uses:
  *   search_probe <query> [save.html]    live search through youtube_lite
  *   search_probe --file <doc.html>      parse a saved document (fixture)
+ *   search_probe --json <url> <api.json> build the document from a saved
+ *                                        search/next API response, then parse
  * Prints one line per parsed video; exits 1 when nothing was parsed. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "tilefinch/budget.h"
+#include "tilefinch/fetch.h"
 #include "tilefinch/session.h"
 #include "tilefinch/youtube_lite.h"
 
@@ -22,6 +25,9 @@ static int print(const char *html, size_t length)
                videos[i].duration, videos[i].title, videos[i].channel,
                videos[i].meta);
     }
+    char more[2048];
+    if (yt_more_url(html, length, more, sizeof more))
+        printf("more=%.80s...\n", more);
     printf("parsed=%zu\n", count);
     return count > 0 ? 0 : 1;
 }
@@ -36,13 +42,45 @@ int main(int argc, char **argv)
         fclose(file);
         return print(html, length);
     }
+    if (argc >= 3 && strcmp(argv[1], "--get") == 0) {
+        Budget budget;
+        budget_init(&budget, 4u * 1024u * 1024u);
+        FetchResult result = {0};
+        bool ok = fetch_url(&budget, argv[2], 64u * 1024u, 10000, &result);
+        printf("ok=%d status=%ld length=%zu\n%.*s\n", ok ? 1 : 0,
+               result.status_code, result.length, (int) result.length,
+               result.data == NULL ? "" : result.data);
+        fetch_result_free(&result);
+        return ok ? 0 : 1;
+    }
+    if (argc >= 4 && strcmp(argv[1], "--json") == 0) {
+        FILE *file = fopen(argv[3], "rb");
+        if (file == NULL) return 2;
+        static char json[4u * 1024u * 1024u];
+        size_t length = fread(json, 1, sizeof json - 1, file);
+        fclose(file);
+        Budget budget;
+        budget_init(&budget, 16u * 1024u * 1024u);
+        YoutubeLiteDocument document = {0};
+        char error[256] = {0};
+        if (!youtube_lite_build_document(&budget, argv[2], json, length,
+                                         &document, error, sizeof error)) {
+            fprintf(stderr, "build failed: %s\n", error);
+            return 1;
+        }
+        int status = print(document.html, document.html_length);
+        youtube_lite_document_destroy(&document);
+        return status;
+    }
     if (argc < 2) {
         fprintf(stderr, "usage: %s <query> [save.html] | --file <doc>\n",
                 argv[0]);
         return 2;
     }
-    char url[1024];
-    if (!yt_search_url(argv[1], url, sizeof url)) return 2;
+    char url[2048];
+    if (strncmp(argv[1], "https://", 8) == 0)
+        snprintf(url, sizeof url, "%s", argv[1]);
+    else if (!yt_search_url(argv[1], url, sizeof url)) return 2;
     printf("url=%s\n", url);
     Budget budget;
     budget_init(&budget, 16u * 1024u * 1024u);

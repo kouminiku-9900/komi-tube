@@ -14,6 +14,8 @@
 #include "tilefinch/youtube_resolver.h"
 
 #define YOUTUBE_LITE_TITLE_LIMIT 256
+/* komi-tube: "Up next" on a watch page (was 6). */
+#define YOUTUBE_LITE_WATCH_RECOMMENDATIONS 12
 #define YOUTUBE_LITE_CHANNEL_LIMIT 128
 #define YOUTUBE_LITE_METADATA_LIMIT 80
 /*
@@ -736,8 +738,84 @@ enum {
     YOUTUBE_LITE_RENDERER_VIDEO,
     YOUTUBE_LITE_RENDERER_GRID_VIDEO,
     YOUTUBE_LITE_RENDERER_COMPACT_VIDEO,
+    YOUTUBE_LITE_RENDERER_LOCKUP,
     YOUTUBE_LITE_RENDERER_DESCRIPTION_HEADER
 };
+
+/*
+ * komi-tube: the newer "lockup" card. About one search response in six
+ * (2026-09) carries every video this way and no videoWithContextRenderer at
+ * all, which left the page empty:
+ *   lockupViewModel { contentId, contentType: LOCKUP_CONTENT_TYPE_VIDEO,
+ *     contentImage ... thumbnailBadgeViewModel { text: "5:34" },
+ *     metadata.lockupMetadataViewModel { title { content },
+ *       metadata.contentMetadataViewModel.metadataRows [
+ *         { metadataParts [ avatarStack ... { text { content: channel } },
+ *                           { text { content: views } },
+ *                           { text { content: published } } ] },
+ *         spacer, { description row } ] } }
+ */
+static bool lite_parse_lockup(const YoutubeLiteSpan *renderer,
+                              YoutubeLiteVideo *video)
+{
+    YoutubeLiteVideo parsed = {0};
+    /* Byline rows carry their own nested "contentType" before the card's,
+       so look for the card's value itself rather than the first key. */
+    if (lite_find_bytes(renderer->start, renderer->end,
+                        "\"LOCKUP_CONTENT_TYPE_VIDEO\"") == NULL
+        || !lite_json_key_string(
+               renderer, "contentId", parsed.id, sizeof(parsed.id))
+        || !lite_valid_video_id(parsed.id)) return false;
+    YoutubeLiteSpan badge;
+    if (lite_json_key(renderer, "thumbnailBadgeViewModel", NULL, &badge))
+        (void) lite_json_key_string(
+            &badge, "text", parsed.duration, sizeof(parsed.duration));
+    YoutubeLiteSpan metadata;
+    if (lite_json_key(renderer, "lockupMetadataViewModel", NULL, &metadata)) {
+        YoutubeLiteSpan title;
+        if (lite_json_key(&metadata, "title", NULL, &title))
+            (void) lite_json_key_string(
+                &title, "content", parsed.title, sizeof(parsed.title));
+        YoutubeLiteSpan rows;
+        if (lite_json_key(&metadata, "metadataRows", NULL, &rows)) {
+            /* The byline row ends where the description row begins. */
+            const char *description = lite_find_bytes(
+                rows.start, rows.end, "METADATA_ROW_CONTENT_TYPE_DESCRIPTION");
+            YoutubeLiteSpan byline = {
+                rows.start, description != NULL ? description : rows.end};
+            char *fields[] = {parsed.channel, parsed.views, parsed.published};
+            size_t sizes[] = {sizeof(parsed.channel), sizeof(parsed.views),
+                              sizeof(parsed.published)};
+            const char *after = byline.start;
+            for (size_t i = 0; i < 3; i++) {
+                YoutubeLiteSpan text;
+                if (!lite_json_key(&byline, "text", after, &text)) break;
+                after = text.end;
+                if (!lite_json_key_string(&text, "content", fields[i],
+                                          sizes[i])) {
+                    i--;
+                    continue;
+                }
+            }
+        }
+    }
+    if (parsed.title[0] == '\0')
+        snprintf(parsed.title, sizeof(parsed.title), "YouTube video");
+    /* Cards without a date put the description where the date would be. */
+    if (strlen(parsed.published) > 32u) parsed.published[0] = '\0';
+    *video = parsed;
+    return true;
+}
+
+static bool lite_parse_card(const YoutubeLiteSpan *renderer, size_t kind,
+                            YoutubeLiteVideo *video)
+{
+    return kind == YOUTUBE_LITE_RENDERER_LOCKUP
+        ? lite_parse_lockup(renderer, video)
+        : lite_parse_video(
+              renderer, kind == YOUTUBE_LITE_RENDERER_VIDEO_WITH_CONTEXT,
+              video);
+}
 
 typedef struct {
     const char *name;
@@ -755,6 +833,7 @@ static bool lite_next_video_renderer(
         {"videoRenderer", sizeof("videoRenderer") - 1u},
         {"gridVideoRenderer", sizeof("gridVideoRenderer") - 1u},
         {"compactVideoRenderer", sizeof("compactVideoRenderer") - 1u},
+        {"lockupViewModel", sizeof("lockupViewModel") - 1u},
         {"videoDescriptionHeaderRenderer",
          sizeof("videoDescriptionHeaderRenderer") - 1u}
     };
@@ -814,10 +893,7 @@ static size_t lite_parse_videos(const char *json, size_t length,
                 &all, after, false, &renderer, &selected_kind)) break;
         after = renderer.end;
         YoutubeLiteVideo candidate;
-        if (lite_parse_video(
-                &renderer,
-                selected_kind == YOUTUBE_LITE_RENDERER_VIDEO_WITH_CONTEXT,
-                &candidate)
+        if (lite_parse_card(&renderer, selected_kind, &candidate)
             && !lite_video_duplicate(videos, count, candidate.id)) {
             videos[count++] = candidate;
         }
@@ -1694,7 +1770,8 @@ static bool lite_build_document_with_comments_decoded(
     size_t result_count = decoded == NULL || description_requested ? 0 : lite_parse_videos(
         decoded, decoded_length, videos, YOUTUBE_LITE_MAXIMUM_RESULTS);
     size_t display_count = route == YOUTUBE_LITE_ROUTE_WATCH
-        && result_count > 6 ? 6 : result_count;
+        && result_count > YOUTUBE_LITE_WATCH_RECOMMENDATIONS
+        ? YOUTUBE_LITE_WATCH_RECOMMENDATIONS : result_count;
 
     char query[YOUTUBE_LITE_QUERY_LIMIT] = {0};
     (void) lite_query_value(
@@ -2167,10 +2244,8 @@ static void lite_build_video_pump(YoutubeLiteBuildWork *work)
             return;
         }
         YoutubeLiteVideo parsed;
-        if (!work->description_requested && lite_parse_video(
-                &renderer,
-                kind == YOUTUBE_LITE_RENDERER_VIDEO_WITH_CONTEXT,
-                &parsed)
+        if (!work->description_requested
+            && lite_parse_card(&renderer, kind, &parsed)
             && !lite_video_duplicate(
                 work->videos, work->video_count, parsed.id)) {
             work->videos[work->video_count++] = parsed;
@@ -2494,7 +2569,8 @@ static void lite_build_work_pump(YoutubeLiteBuildWork *work)
         break;
     case YOUTUBE_LITE_BUILD_EMIT_UP_NEXT: {
         size_t display = work->route == YOUTUBE_LITE_ROUTE_WATCH
-            && work->video_count > 6u ? 6u : work->video_count;
+            && work->video_count > YOUTUBE_LITE_WATCH_RECOMMENDATIONS
+            ? YOUTUBE_LITE_WATCH_RECOMMENDATIONS : work->video_count;
         if (work->route == YOUTUBE_LITE_ROUTE_WATCH
             && !work->description_requested && display != 0) {
             ok = lite_html_text(&work->html, "<h2>Up next</h2>");
@@ -2505,7 +2581,8 @@ static void lite_build_work_pump(YoutubeLiteBuildWork *work)
     }
     case YOUTUBE_LITE_BUILD_EMIT_VIDEOS: {
         size_t display = work->route == YOUTUBE_LITE_ROUTE_WATCH
-            && work->video_count > 6u ? 6u : work->video_count;
+            && work->video_count > YOUTUBE_LITE_WATCH_RECOMMENDATIONS
+            ? YOUTUBE_LITE_WATCH_RECOMMENDATIONS : work->video_count;
         if (work->route != YOUTUBE_LITE_ROUTE_HOME
             && !work->description_requested
             && work->emit_index < display) {
@@ -2543,7 +2620,8 @@ static bool lite_build_work_take_document(
         || work->phase != YOUTUBE_LITE_BUILD_DONE
         || work->html.data == NULL) return false;
     size_t display = work->route == YOUTUBE_LITE_ROUTE_WATCH
-        && work->video_count > 6u ? 6u : work->video_count;
+        && work->video_count > YOUTUBE_LITE_WATCH_RECOMMENDATIONS
+            ? YOUTUBE_LITE_WATCH_RECOMMENDATIONS : work->video_count;
     *document = (YoutubeLiteDocument) {
         .budget = work->budget,
         .html = work->html.data,
@@ -2766,10 +2844,10 @@ typedef struct {
 
 /* Parsed facts only, never a retained HTML/JSON response. Shares the existing
    two-entry, Budget-owned adapter cache and its cookie/portal/expiry rules. */
-#define YOUTUBE_LITE_WATCH_CACHE_ADAPTER "youtube-watch-facts-v1"
+#define YOUTUBE_LITE_WATCH_CACHE_ADAPTER "youtube-watch-facts-v2"
 typedef struct {
     YoutubeLiteWatch watch;
-    YoutubeLiteVideo videos[6];
+    YoutubeLiteVideo videos[YOUTUBE_LITE_WATCH_RECOMMENDATIONS];
     size_t video_count;
     YoutubeLiteIdentity identity;
     char token[YOUTUBE_LITE_CONTINUATION_LIMIT];
@@ -2777,8 +2855,8 @@ typedef struct {
     bool comments_ready;
     TilefinchDateFormat date_format;
 } YoutubeLiteWatchFacts;
-_Static_assert(sizeof(YoutubeLiteWatchFacts) <= 16u * 1024u,
-               "watch facts must stay within 16 KiB");
+_Static_assert(sizeof(YoutubeLiteWatchFacts) <= 24u * 1024u,
+               "watch facts must stay within 24 KiB");
 
 struct YoutubeLiteLoadJob {
     Budget *budget;
@@ -3397,7 +3475,7 @@ static bool lite_watch_facts_get(YoutubeLiteLoadJob *job)
         || cached.length != sizeof(YoutubeLiteWatchFacts)
         || cached.source_bytes > job->maximum_source_bytes) return false;
     const YoutubeLiteWatchFacts *facts = (const void *) cached.data;
-    if (facts->video_count > 6u
+    if (facts->video_count > YOUTUBE_LITE_WATCH_RECOMMENDATIONS
         || strcmp(facts->language, job->language) != 0
         || facts->date_format != tilefinch_platform_preferred_date_format()
         || (job->supplemental_requested && !facts->comments_ready)) return false;
@@ -3440,8 +3518,9 @@ static void lite_watch_facts_store(YoutubeLiteLoadJob *job)
         job->budget, BUDGET_CATEGORY_RESOURCE, 1, sizeof(*facts));
     if (facts == NULL) return; /* Optional reuse must never prevent opening. */
     facts->watch = job->build->watch;
-    facts->video_count = job->build->video_count > 6u
-        ? 6u : job->build->video_count;
+    facts->video_count = job->build->video_count
+        > YOUTUBE_LITE_WATCH_RECOMMENDATIONS
+        ? YOUTUBE_LITE_WATCH_RECOMMENDATIONS : job->build->video_count;
     memcpy(facts->videos, job->build->videos,
            facts->video_count * sizeof(facts->videos[0]));
     facts->identity = job->identity;

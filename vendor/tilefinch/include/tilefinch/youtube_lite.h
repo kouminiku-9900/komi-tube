@@ -9,7 +9,7 @@
 #include "tilefinch/fetch.h"
 #include "tilefinch/session.h"
 
-#define YOUTUBE_LITE_MAXIMUM_RESULTS 12
+#define YOUTUBE_LITE_MAXIMUM_RESULTS 20
 #define YOUTUBE_LITE_MAXIMUM_COMMENTS 8
 #define YOUTUBE_LITE_MAXIMUM_SOURCE_BYTES (2u * 1024u * 1024u)
 /* Also bounds direct search API responses (~150-190 KiB observed). */

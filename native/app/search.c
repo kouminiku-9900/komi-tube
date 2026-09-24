@@ -11,13 +11,8 @@ struct SearchJob {
     YoutubeLiteLoadJob *load;
 };
 
-SearchJob *search_begin(const char *query, char *error, size_t error_size)
+SearchJob *search_begin_url(const char *url, char *error, size_t error_size)
 {
-    char url[1024];
-    if (!yt_search_url(query, url, sizeof url)) {
-        snprintf(error, error_size, "検索語が空か長すぎます");
-        return NULL;
-    }
     SearchJob *job = calloc(1, sizeof *job);
     if (job == NULL) return NULL;
     job->load = youtube_lite_load_begin(
@@ -31,6 +26,7 @@ SearchJob *search_begin(const char *query, char *error, size_t error_size)
 }
 
 SearchStatus search_pump(SearchJob *job, YtVideo *videos, size_t *count,
+                         char *more_url, size_t more_size,
                          char *error, size_t error_size)
 {
     YoutubeLiteLoadStatus status = youtube_lite_load_pump(job->load, NULL);
@@ -44,6 +40,9 @@ SearchStatus search_pump(SearchJob *job, YtVideo *videos, size_t *count,
     }
     *count = yt_parse_cards(document.html, document.html_length, videos,
                             SEARCH_RESULTS);
+    if (!yt_more_url(document.html, document.html_length, more_url,
+                     more_size))
+        more_url[0] = '\0';
     if (*count == 0) {
         /* Keep the document that produced nothing, for the Mac-side
            fixture tests (native/tests/fixtures). */

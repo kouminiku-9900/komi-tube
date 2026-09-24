@@ -85,12 +85,17 @@ tilefinchをブラウザなしで動かすときに要ったこと（次に同�
 - Macのテスト：`scripts/test_native.sh`（検索カードの読み取りfixture、マイリストの往復）。`--live 猫`で実際の検索も確認できる。
 - 入れ方：`scripts/install_native.sh`（PSPLinkがつながっていればそれで、無ければマウントされたスティックへ。マイリストとWi-Fiのメモは消さない）。
 
-ユーザーに確認してもらうこと（自動試験では確かめられない）：
+ユーザーの確認結果（2026-09-24）と対応：
 
-1. OSKで漢字に変換して検索できるか（SELECTでモード切替）。
-2. XMBからの起動で、本体の接続画面が出て自動でつながるか。
-3. 操作感（文字の大きさ、一覧の見やすさ、再生中の表示）。
-4. 動画を見ている間に画面が暗くならないか（ブラウザ版にも同じ対策を入れた。下記）。
+- Wi-Fi（XMBから起動、本体の接続画面）と画面の見た目：問題なし。
+- **決定ボタン**：ユーザーは×決定の設定。OSKは×決定なのにアプリは○決定で混乱する → 本体設定（`PSP_SYSTEMPARAM_ID_INT_UNKNOWN`＝9、0なら○、1なら×）を読んで決定/戻るを入れ替え、画面下の案内のアイコンも合わせた（`read_button_setting`）。
+- **OSKで漢字変換できない**：tilefinchと同じく漢字モードを明示しても、自作プログラムから開いたOSKでは変換が出ない（原因は不明。本体側の変換機能を呼び出す条件が分かっていない）。→ アプリ側で変換する：OSKで打った文字にひらがなが含まれていたら、Googleの変換サービス（`https://www.google.com/transliterate?langpair=ja-Hira|ja&text=`、文節ごとに最大5候補）とYouTubeの検索候補（`suggestqueries.google.com/complete/search?client=firefox&ds=yt`）から候補一覧を出し、選んで検索する（`native/app/kanji.c`、`choose_candidate`）。△で候補をOSKに戻して修正できる。
+- **検索件数が少ない**：L/Rでページ送り（`tilefinch_token`付きの続きのURLを読む）。続きの応答は5〜20本とばらつくので、12本未満なら次の続きを2回まで読み足す。1ページ最大20本（`YOUTUBE_LITE_MAXIMUM_RESULTS`を12→20）。
+- **検索が0件になることがある件**：原因はYouTubeの新形式のカード（`lockupViewModel`）。6回に1回ほど、応答の動画がすべてこの形式で来て、tilefinchの解析部品が読めずに0件になっていた。`youtube_lite.c`に読み取り（`lite_parse_lockup`）を追加。両形式の保存応答を`native/tests/fixtures/api-search-*.html`に置いた。
+- **関連動画**：一覧・マイリスト・再生中に□。動画ページ（next API）の「Up next」を読む。上限を6→12本に（`YOUTUBE_LITE_WATCH_RECOMMENDATIONS`、動画ページのキャッシュ上限を16→24KB、tilefinchのテストも合わせた）。一覧は4段まで積み、戻るで前の一覧に戻る。
+- 自動試験（変換→検索→次ページ→前ページ→関連→戻る→再生といいね→マイリスト）は実機でPASS。
+
+**注意**：`YOUTUBE_LITE_MAXIMUM_RESULTS`と`lockupViewModel`の変更はブラウザ版にも効くが、ブラウザ版はまだ作り直して入れていない（1ページ20本にしたときのブラウザ版のメモリは未確認）。
 
 **再生中に画面が暗くなる件**：tilefinchには`scePowerTick`が一度も無く、ボタンを押さずに見ていると本体設定の時間で暗くなり、自動スリープもしていた。`psp_media_session.c`の`psp_media_advance`で、再生中・読み込み中は1秒ごとに`scePowerTick(PSP_POWER_TICK_ALL)`を呼ぶようにした。ブラウザ版（`KOMI_TUBE/slot-a/EBOOT.PBP`）にも入れてPSPLink経由で差し替え済み。
 

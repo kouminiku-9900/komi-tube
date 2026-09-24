@@ -18,10 +18,23 @@ cc -std=c11 -O1 -Wall -Wextra -o "$OUT/mylist_test" \
     -I"$PROJECT_ROOT/native/app" \
     "$PROJECT_ROOT/native/tests/mylist_test.c" "$PROJECT_ROOT/native/app/mylist.c"
 "$OUT/mylist_test" "$OUT/mylist-test.txt"
-for fixture in "$PROJECT_ROOT"/native/tests/fixtures/*.html; do
+cc -std=c11 -O1 -Wall -Wextra -o "$OUT/kanji_test" \
+    -I"$PROJECT_ROOT/native/app" \
+    "$PROJECT_ROOT/native/tests/kanji_test.c" "$PROJECT_ROOT/native/app/kanji.c"
+"$OUT/kanji_test"
+for fixture in "$PROJECT_ROOT"/native/tests/fixtures/search-*.html; do
     [ -f "$fixture" ] || continue
     printf '%s: ' "$(basename "$fixture")"
     "$OUT/search_probe" --file "$fixture" | tail -1
+done
+# Saved search API responses (both card formats YouTube sends), wrapped the
+# way youtube_lite_build_document reads them.
+for fixture in "$PROJECT_ROOT"/native/tests/fixtures/api-search-*.html; do
+    [ -f "$fixture" ] || continue
+    printf '%s: ' "$(basename "$fixture")"
+    "$OUT/search_probe" --json \
+        'https://m.youtube.com/results?search_query=%E7%8C%AB' "$fixture" \
+        | tail -1
 done
 if [ "${1:-}" = "--live" ]; then
     "$OUT/search_probe" "${2:-猫}" "$OUT/last-search.html"

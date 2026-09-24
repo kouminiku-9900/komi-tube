@@ -191,6 +191,19 @@ size_t yt_parse_cards(const char *html, size_t length, YtVideo *videos,
     return count;
 }
 
+int yt_more_url(const char *html, size_t length, char *url, size_t size)
+{
+    static const char marker[] = "<a class=more href=\"";
+    const char *end = html + length;
+    const char *at = find(html, end, marker);
+    if (at == NULL || size == 0) return 0;
+    at += sizeof marker - 1;
+    const char *close = find(at, end, "\"");
+    if (close == NULL || find(at, close, "tilefinch_token=") == NULL) return 0;
+    copy_text(at, close, url, size);
+    return url[0] != '\0' && strlen(url) + 1 < size;
+}
+
 int yt_search_url(const char *query, char *url, size_t size)
 {
     static const char prefix[] = "https://m.youtube.com/results?search_query=";

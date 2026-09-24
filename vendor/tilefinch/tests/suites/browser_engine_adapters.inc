@@ -95,7 +95,7 @@ static int test_watch_metadata_reuse(void)
     for (size_t i = 0; i < BROWSER_SITE_ADAPTER_DOCUMENT_CACHE_ENTRIES; i++)
         if (session.site_adapter_document_cache[i].valid)
             retained += session.site_adapter_document_cache[i].length;
-    CHECK(retained > 0 && retained <= 16u * 1024u);
+    CHECK(retained > 0 && retained <= 24u * 1024u);
     printf("watch-reuse retained-bytes=%zu\n", retained);
     for (size_t i = 0; i < 2; i++) {
         CHECK(test_watch_reuse_load(&budget, &session, urls[i], false, &document,

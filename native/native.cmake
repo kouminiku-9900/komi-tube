@@ -105,6 +105,7 @@ komi_program(komi-player "komi-player"
 komi_program(komi-app "komi-tube"
     SOURCES
         "${KOMI_NATIVE_DIR}/app/main.c"
+        "${KOMI_NATIVE_DIR}/app/kanji.c"
         "${KOMI_NATIVE_DIR}/app/mylist.c"
         "${KOMI_NATIVE_DIR}/app/osk.c"
         "${KOMI_NATIVE_DIR}/app/search.c"
