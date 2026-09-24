@@ -369,7 +369,24 @@ bool komi_services_init(void)
         komi_result("FAIL trust bundle %s", ca_path);
         return false;
     }
-    komi.network_ready = connect_network();
+    /* From the XMB, connect the way the browser version does: the firmware
+       joins the last-used access point by itself and shows its chooser only
+       if that fails. Under PSPLink (host0:) nobody is there to press a
+       button, so try the saved profiles without any dialog instead. */
+    bool unattended = komi.argv0 != NULL
+        && strncmp(komi.argv0, "host0:", 6) == 0;
+    if (unattended) {
+        komi.network_ready = connect_network();
+    } else {
+        komi_progress("network-dialog");
+        int profile = 0;
+        PspBootConnectResult connected = psp_network_boot_connect(&profile);
+        (void) psp_display_rearm(&komi.display);
+        komi_result("network dialog result=%d profile=%d heap-used=%u",
+                    (int) connected, profile, komi_heap_used());
+        komi.network_ready = connected == PSP_BOOT_CONNECT_READY;
+        if (komi.network_ready) fetch_background_transport_set_admission(true);
+    }
     if (!komi.network_ready) return false;
     budget_init(&komi.budget, BUDGET_BYTES);
     if (!browser_session_init(&komi.session, &komi.budget,
