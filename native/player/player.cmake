@@ -41,7 +41,7 @@ foreach(_kind elf prx)
     # which would change struct layouts shared with tilefinch_core.
     target_compile_definitions(${_target} PRIVATE
         TILEFINCH_PSP_LIVE_NETWORK=1 TILEFINCH_PSP_LOG_IMPLEMENTATION=1)
-    target_link_options(${_target} PRIVATE "LINKER:--wrap=printf")
+    target_link_options(${_target} PRIVATE "LINKER:--wrap=printf" "LINKER:--wrap=memalign")
     target_link_libraries(${_target} PRIVATE
         tilefinch_core tilefinch_psp_ui tilefinch_psp_display
         tilefinch_psp_media_scale tilefinch_psp_media_present

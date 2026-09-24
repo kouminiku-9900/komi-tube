@@ -24,7 +24,7 @@ tilefinch（PSP向けブラウザ）にYouTubeを表示させる今の構成か�
 |---|---|---|---|
 | 0前半 | メモリ配置の実測 | **完了** | 済 |
 | 0後半 | 部品を`derived/`へ切り出し、`net/http.h`を定義 | 未着手 | 不要 |
-| 1 | ブラウザなしの再生EBOOT（OSKで動画ID → `yt/resolver` → `media/Player`）、`profiles.cfg`の外部化 | **一部完了**：10本連続再生は実機で合格（下記）。H.264の拡張領域試験、OSK入口、`profiles.cfg`は未 | 済（PSPLink） |
+| 1 | ブラウザなしの再生EBOOT（OSKで動画ID → `yt/resolver` → `media/Player`）、`profiles.cfg`の外部化 | **ほぼ完了**：10本連続再生（360p）とH.264の拡張領域試験は実機で合格（下記）。OSK入口、`profiles.cfg`は未 | 済（PSPLink） |
 | 2 | HTTPの自前化（mbedTLS＋curlを直接、Range、gzip、リダイレクト、キャンセル） | 未着手 | 1回目か3回目に同乗 |
 | 3 | ネイティブ画面（検索→結果（サムネイル）→再生、GU＋intraFont、JSONはストリーミングで読む） | 未着手 | 1回（操作感はユーザーが判断） |
 | 4 | 関連動画、設定、字幕、履歴、スリープ復帰、PSP goの`ef0:` | 未着手 | 3回目に同乗できるかも |
@@ -41,7 +41,7 @@ tilefinch（PSP向けブラウザ）にYouTubeを表示させる今の構成か�
 ### 段階1で必ず入れること（実機1回で済ませるため）
 
 - 起動すると、テスト用の動画IDリスト（`data/`に置くテキスト）を自動で順に再生し、1本ごとに確保量、失敗、所要時間をログに残す。OSK入力は手動確認用の入口として残す。
-- **H.264（mpeg_vsh / sceMpeg）が拡張領域（`0x0A000000`以上）のバッファを読めるか**の試験を同じEBOOTに入れる。AACは読めた（下記）が、H.264は未確認。
+- ~~H.264が拡張領域のバッファを読めるか~~ → **読める**（2026-09-24、`komi-player`の`me_high=1`で確認）。
 - `yt/resolver`は既存の`vendor/tilefinch/src/youtube_resolver.c`（クライアント設定、フォーマット選択、STSキャッシュ）から移植する。`yt/`とdemuxは、Mac上の実通信テストとfixtureテストの両方を用意する。
 - 合格ライン：実機で10本連続再生して、確保失敗も断片化も起きないこと。
 
@@ -60,14 +60,15 @@ tilefinchをブラウザなしで動かすときに要ったこと（次に同�
 - **Wi-Fi**：ダイアログなしの`psp_network_begin`＋`psp_network_pump`で接続できる。ただし保存設定のうち今いる場所で届くもの（このPSPでは7番）を選ぶ必要がある。`komi-player`は保存設定を全部列挙し、前回成功した番号（`komi-wifi.txt`）から順に試す。`config/boot.cfg`の`network_profile=1`は届かない設定だった。
 - **ログ**：リリース設定では`psp_log_*`がマクロで空になり、`src/psp_log.c`も空関数になる。`TILEFINCH_PSP_VALIDATION_LOG`を全体に付けると`tilefinch_core`と構造体の形がずれる（`media_backend.h`、`psp_display.h`、`psp_ui.h`に条件付きのメンバーがある）。そこで`TILEFINCH_PSP_LOG_IMPLEMENTATION=1`を付け、`psp_log.c`だけを有効化した版（`native/player/psp_log_enabled.c`）をコンパイルしている。`tilefinch_core`の`printf`は`--wrap=printf`で同じログへ流す。
 - **メモリの測り方**：`PSP_HEAP_SIZE_KB(-1)`で区画全体をnewlibが最初に取るため、`sceKernelTotalFreeMemSize`は常に約2.3MBしか示さない。実際の使用量は`mallinfo().uordblks`で見る。
-- 画質の要求は360pにしているが、失敗時の詳細には`quality=240`と出る（空きメモリの見積もりが`sceKernelTotalFreeMemSize`基準のためと思われる）。成功時の実際の解像度はまだ記録していない。次の版で記録する。
+- **360p**：`media_psp_backend_set_wide_program("")`（空＝実機で確認済みのワイド再生）を呼ばないと、バックエンドは240pの互換モードのままになる。ブラウザは`boot.cfg`の`experimental_wide_video`（既定は空）から呼んでいる。呼ぶようにしてから、10本すべて640x360/480x360（itag 134＋140）で合格（`docs/field-results/2026-09-24-player-v2-360p/`）。
+- **H.264も拡張領域で動く**（`docs/field-results/2026-09-24-player-v3-me-high/report.md`）。Media Engine用の領域を0x0A400000に置いても、10本すべて合格した。
+- `komi-player.cfg`（任意）：`me_high=1`（拡張領域試験）、`play_seconds=N`、`max_videos=N`。
 
 段階1で残っていること：
 
-1. **H.264が拡張領域のバッファを読めるか**の試験（`komi-player`に追加するか、memprobe v3）。
-2. 再生中の実際の解像度・itag・音声の途切れを結果行に出す。空きメモリの見積もりをヒープ基準に直して360pが選ばれるか確かめる。
-3. OSKで動画IDを入れる手動確認用の入口、`profiles.cfg`の外部化。
-4. その後に段階0後半（`derived/`への切り出しと`net/http.h`）。`komi-player`がリンクしている範囲が、切り出すべき部品の一覧になる。
+1. OSKで動画IDを入れる手動確認用の入口、`profiles.cfg`の外部化。
+2. その後に段階0後半（`derived/`への切り出しと`net/http.h`）。`komi-player`がリンクしている範囲が、切り出すべき部品の一覧になる。
+3. `media_backend_psp_pool.h`の前提（MEは拡張領域を読めない）が誤りと分かったので、ネイティブ版ではME用領域を低位に固定しない設計を検討する。
 
 ## 検証の方針（2026-09-24、ユーザーと合意）
 

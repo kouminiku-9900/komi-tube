@@ -118,6 +118,26 @@ int __wrap_printf(const char *format, ...)
     return length;
 }
 
+/* Every aligned block of 4 KiB or more, for the first few dozen: the Media
+   Engine pool (reserved at boot) and any decoder buffer that falls back to
+   the heap are memalign calls, so this shows exactly where they landed
+   (linked with --wrap=memalign). */
+void *__real_memalign(size_t alignment, size_t size);
+static unsigned memalign_reports;
+
+void *__wrap_memalign(size_t alignment, size_t size)
+{
+    void *block = __real_memalign(alignment, size);
+    if (size >= 4096u && memalign_reports < 40u) {
+        memalign_reports++;
+        result("memalign bytes=%u align=%u at=0x%08x side=%s",
+               (unsigned) size, (unsigned) alignment,
+               (unsigned) (uintptr_t) block,
+               (uintptr_t) block >= UINT32_C(0x0A000000) ? "high" : "low");
+    }
+    return block;
+}
+
 static void progress(const char *stage)
 {
     progress_stage = stage;
@@ -310,6 +330,57 @@ static void pump(uint64_t *last_us, unsigned *presented, uint64_t *identity)
 
 /* --- the test --- */
 
+/* komi-player.cfg beside the program: key=value lines, all optional.
+     me_high=1       fill the heap below 0x0A000000 before the Media Engine
+                     pool is reserved, so every decoder buffer lands in the
+                     extended bank (is H.264 able to read it there?)
+     play_seconds=N  how long each video plays (default 30)
+     max_videos=N    play only the first N of komi-videos.txt */
+typedef struct {
+    bool me_high;
+    unsigned play_seconds;
+    unsigned max_videos;
+} Config;
+
+static void load_config(const char *path, Config *config)
+{
+    config->me_high = false;
+    config->play_seconds = PLAY_US / 1000000u;
+    config->max_videos = MAX_VIDEOS;
+    FILE *file = fopen(path, "r");
+    if (file == NULL) return;
+    char line[128];
+    while (fgets(line, sizeof line, file) != NULL) {
+        unsigned value = 0;
+        if (sscanf(line, "me_high=%u", &value) == 1)
+            config->me_high = value != 0;
+        else if (sscanf(line, "play_seconds=%u", &value) == 1 && value > 0)
+            config->play_seconds = value;
+        else if (sscanf(line, "max_videos=%u", &value) == 1 && value > 0
+                 && value < MAX_VIDEOS)
+            config->max_videos = value;
+    }
+    fclose(file);
+}
+
+#define ME_VISIBLE_LIMIT UINT32_C(0x0A000000)
+
+/* Newlib's heap grows upward from the program image, so one allocation that
+   reaches just past the limit leaves every later large block above it. */
+static void *fill_low_heap(void)
+{
+    void *probe = malloc(64);
+    uintptr_t at = (uintptr_t) probe;
+    free(probe);
+    if (at >= ME_VISIBLE_LIMIT) return NULL;
+    size_t size = (size_t) (ME_VISIBLE_LIMIT - at) + 256u * 1024u;
+    void *ballast = malloc(size);
+    result("me-high ballast=0x%08x..0x%08x bytes=%u",
+           (unsigned) (uintptr_t) ballast,
+           (unsigned) ((uintptr_t) ballast + size), (unsigned) size);
+    return ballast;
+}
+
 static size_t load_videos(const char *path, char ids[][16], size_t limit)
 {
     FILE *file = fopen(path, "r");
@@ -415,6 +486,8 @@ typedef struct {
     unsigned peak_used;
 } Totals;
 
+static uint64_t play_us = PLAY_US;
+
 static void play_one(const char *id, unsigned index, uint64_t generation,
                      Totals *totals)
 {
@@ -447,7 +520,7 @@ static void play_one(const char *id, unsigned index, uint64_t generation,
             max_position_us = media.ui.current_time_us;
         if (media.ui.failed) { outcome = "failed"; break; }
         if (media.ui.ended) { outcome = "ended"; break; }
-        if (playing_since != 0 && now - playing_since >= PLAY_US) {
+        if (playing_since != 0 && now - playing_since >= play_us) {
             outcome = "ok";
             break;
         }
@@ -458,6 +531,11 @@ static void play_one(const char *id, unsigned index, uint64_t generation,
     snprintf(title, sizeof title, "%s", media.ui.title);
     char status[96];
     snprintf(status, sizeof status, "%s", media.ui.status);
+    char format[64];
+    snprintf(format, sizeof format, "%dx%d itag=%d/%d%s",
+             media.stream.width, media.stream.height, media.stream.itag,
+             media.stream.audio_itag,
+             media.stream.split_streams ? " split" : "");
     MediaBackendStats stats = {0};
     bool have_stats = psp_media_backend_stats_snapshot(&media, &stats);
 
@@ -477,7 +555,8 @@ static void play_one(const char *id, unsigned index, uint64_t generation,
     result("video %u id=%s %s outcome=%s first-frame=%llums "
            "position=%llums frames=%u buffering=%llums "
            "heap-used=%u->%u(peak %u) heap-free=%u "
-           "decoded=%u dropped=%u title=\"%s\" status=\"%s\"",
+           "decoded=%u dropped=%u audio-dropped=%llu format=%s "
+           "title=\"%s\" status=\"%s\"",
            index + 1, id, ok ? "PASS" : "FAIL", outcome,
            (unsigned long long) (first_frame_us == 0
                ? 0 : (first_frame_us - started) / 1000u),
@@ -486,7 +565,8 @@ static void play_one(const char *id, unsigned index, uint64_t generation,
            used_before, used_after, used_peak, heap_free(),
            have_stats ? (unsigned) stats.decoded_video_frames : 0u,
            have_stats ? (unsigned) stats.dropped_video_frames : 0u,
-           title, status);
+           have_stats ? (unsigned long long) stats.dropped_audio_samples : 0ull,
+           format, title, status);
     if (ok) totals->played++;
     else totals->failed++;
     if (used_peak > totals->peak_used) totals->peak_used = used_peak;
@@ -499,7 +579,7 @@ int main(int argc, char **argv)
     sibling_path(log_path, sizeof log_path, argv0, "komi-player.txt");
     result_log = fopen(log_path, "w");
     (void) psp_log_start(argv0);
-    result("start version=2 argv0=%s heap-used=%u heap-free=%u "
+    result("start version=3 argv0=%s heap-used=%u heap-free=%u "
            "kernel-free=%u", argv0 == NULL ? "?" : argv0, heap_used(),
            heap_free(), (unsigned) sceKernelTotalFreeMemSize());
 
@@ -507,6 +587,14 @@ int main(int argc, char **argv)
         "komi_watchdog", watchdog_thread, 0x11, 16 * 1024,
         PSP_THREAD_ATTR_USER, NULL);
     if (watchdog >= 0) sceKernelStartThread(watchdog, 0, NULL);
+
+    char config_path[256];
+    sibling_path(config_path, sizeof config_path, argv0, "komi-player.cfg");
+    Config config;
+    load_config(config_path, &config);
+    play_us = (uint64_t) config.play_seconds * 1000000u;
+    result("config me_high=%d play_seconds=%u", config.me_high ? 1 : 0,
+           config.play_seconds);
 
     (void) scePowerSetClockFrequency(333, 333, 166);
     static const TilefinchPlatformServices services = {
@@ -519,7 +607,22 @@ int main(int argc, char **argv)
     tilefinch_platform_set_services(&services);
     /* Before any other allocation, as the browser does: the decoder's
        working set must sit where the Media Engine can reach it. */
+    void *ballast = config.me_high ? fill_low_heap() : NULL;
     media_psp_backend_reserve_pool();
+    {
+        /* The pool is the first large block after the ballast; a block taken
+           right after it shows which side of the limit the pool fell on (large, so
+           no small freed chunk below can satisfy it). */
+        void *after = malloc(128u * 1024u);
+        result("me-pool next-block=0x%08x side=%s",
+               (unsigned) (uintptr_t) after,
+               (uintptr_t) after >= ME_VISIBLE_LIMIT ? "high" : "low");
+        free(after);
+    }
+    /* An empty name selects the hardware-qualified wide program, as the
+       browser's default boot.cfg does; without this call the backend stays
+       on the 240p compatibility program. */
+    media_psp_backend_set_wide_program("");
     if (!psp_display_begin(&display, psp_display_system_backend()))
         result("display begin failed; continuing without video output");
     clear_screen();
@@ -537,7 +640,7 @@ int main(int argc, char **argv)
     char list_path[256];
     sibling_path(list_path, sizeof list_path, argv0, "komi-videos.txt");
     static char ids[MAX_VIDEOS][16];
-    size_t count = load_videos(list_path, ids, MAX_VIDEOS);
+    size_t count = load_videos(list_path, ids, config.max_videos);
     result("videos=%u list=%s", (unsigned) count, list_path);
     if (count == 0) goto finish;
 
@@ -585,6 +688,7 @@ int main(int argc, char **argv)
            totals.baseline_used, heap_used(), totals.peak_used,
            (unsigned) budget.current);
     psp_media_shutdown(&media);
+    free(ballast);
 
 finish:
     result("end");
