@@ -45,6 +45,12 @@ tilefinch（PSP向けブラウザ）にYouTubeを表示させる今の構成か�
 - `yt/resolver`は既存の`vendor/tilefinch/src/youtube_resolver.c`（クライアント設定、フォーマット選択、STSキャッシュ）から移植する。`yt/`とdemuxは、Mac上の実通信テストとfixtureテストの両方を用意する。
 - 合格ライン：実機で10本連続再生して、確保失敗も断片化も起きないこと。
 
+## ユーザーの追加要望（2026-09-24）
+
+- **漢字で検索できること（ぜひ、と強い要望）**。段階3の検索画面で入れる。PSPのOSK（`sceUtilityOskInitStart`）の日本語入力で漢字変換まで使えるかを実機で確かめ、使えなければ自前の変換を検討する。表示側は結果のタイトルを日本語で出す必要があるので、intraFontでファームウェアの`flash0:/font/jpn0.pgf`を使う。検索クエリはUTF-8でURLエンコードする。
+- **動画のダウンロード（優先度は低い）**。段階4以降。再生と同じ`yt/resolver`で得たURLから、音声と映像をメモリースティック（`ms0:/PSP/VIDEO/`など）へ保存し、オフラインで再生できるようにする。容量と途中再開（Range）に注意。
+- 実機での現状（MEMSIZE=1にしたtilefinch版）：動画5本ほど続けて見て止まらなかった（ユーザー報告）。エラーログも出ていない。
+
 ## 実機で確定したこと（PSP-3000、kuKernelGetModel=8、FW 6.61）
 
 ログと集計は`docs/field-results/2026-09-24-memprobe-v1/`と`-v2/`。
@@ -89,7 +95,9 @@ ME専用領域は保険として低位に固定したままにする（低位に
   - Mac：`brew install libusb`済み。`tools/pspdev/bin/`の`pspsh`と`usbhostfs_pc`がそのまま動く。
   - PSP：PSPLink v3.2.1にtilefinchのパッチ2つ（HOMEでXMBへ戻る、再生中でも安全な`scrshot-user`）を当ててビルドし、`ms0:/PSP/GAME/PSPLINK/`に入れた。作り直すときは`git clone --branch v3.2.1 --depth 1 https://github.com/pspdev/psplinkusb.git <dir>`のあと`PSPDEV=$PWD/tools/pspdev vendor/tilefinch/scripts/build-psplink-home-exit.sh <dir> build/psplink`。
   - `scripts/psplink.sh ready`／`scripts/psplink.sh exec '<pspshのコマンド>'`：tilefinchの`psplink-shell.sh`を呼ぶ薄い入口。`host0:`は`dist/`。PSP無しで`ready`を実行し、`usbhostfs_pc`が起動してPSPを待つところまで確認済み。
-  - CFWは**6.61 PRO-C**（ユーザー確認済み）。tilefinchはARK-4で使っていたので、PRO-CでPSPLinkが起動するか、EBOOTを`ld`できるか（ARK-4ではできず`tools/psplink-loop`のtfexec.prxでLoadExecしていた）はまだ試していない。
+  - CFWは**6.61 PRO-C**（ユーザー確認済み）。
+- **PRO-CでのPSPLinkは動作確認済み（2026-09-24）**：`scripts/psplink.sh ready`で接続、`ver`は`PSPLink v3.2.1`。`HOST_ROOT=build/memprobe/m1 scripts/psplink.sh exec 'ld host0:/memprobe.prx'`で調査PRXをMacから直接起動でき、ログは`argv[0]`の隣＝`host0:`（Macの`build/memprobe/m1/`）に書かれた。PSPLink内で動かしても空きは**49.6MB**（MEMSIZE=1のEBOOTと同じ）、AAC試験・開閉10回とも実機単体と同じ結果。プログラムが`sceKernelExitGame`で終わってもPSPLinkは残る（`resetonexit=1`）。
+  - よって段階1以降の試験EBOOTは、**PRXも出力してPSPLinkから`ld host0:/…prx`で動かす**のを標準にする（memprobeの`Makefile`と同じ）。ログは`argv[0]`の隣に書く。スティックへのコピーは配布用の最終確認だけにする。
 - tilefinch本体に実機自動化の一式がある：`vendor/tilefinch/docs/engineering/PSPLINK_DEV_LOOP.md`、`vendor/tilefinch/scripts/psplink-shell.sh`（`usbhostfs_pc`の起動と時間制限付きの`pspsh`実行）、`tools/psplink-loop`（EBOOTを直接`ld`できないCFW向けにLoadExecする小さなPRX）。PSP-3000＋ARK-4で使われていたもの。これを流用する。
 - 注意（同文書より）：PSPLink v3.2.1の`scrshot`はMEのファームウェア領域と重なるバッファを使うため、再生中に撮るとAVC/AACがタイムアウトする。再生中の画面はEBOOT自身で撮ること。
 - 目標は、ユーザーの作業を「USBでつなぐ → PSPでPSPLinkを起動する」だけにすること。以降の転送、起動、ログ回収、判定はClaude Codeが行う。
