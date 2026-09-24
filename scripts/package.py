@@ -19,8 +19,8 @@ NAME = 'KOMI_TUBE'
 # (docs/field-results/2026-09-24-memprobe-v1 and -v2).
 MEMSIZE = 1
 
-def set_pbp_title(path: Path, title: str, icon: bytes, memsize: int = MEMSIZE):
-    """Set the public title and MEMSIZE, and replace the upstream launcher icon."""
+def set_pbp_title(path: Path, title: str | None, icon: bytes | None, memsize: int = MEMSIZE):
+    """Set MEMSIZE, and optionally the public title and the upstream launcher icon."""
     data = path.read_bytes()
     magic, version, *offsets = struct.unpack_from('<10I', data)
     if magic != 0x50425000 or len(offsets) != 8:
@@ -39,7 +39,8 @@ def set_pbp_title(path: Path, title: str, icon: bytes, memsize: int = MEMSIZE):
         key = sfo[key_start + key_offset:].split(b'\0', 1)[0]
         value = sfo[value_start + value_offset:value_start + value_offset + length]
         if key == b'TITLE':
-            value = title.encode('utf-8') + b'\0'
+            if title is not None:
+                value = title.encode('utf-8') + b'\0'
             found = True
         elif key == b'MEMSIZE':
             if kind != 0x0404 or length != 4:
@@ -50,7 +51,7 @@ def set_pbp_title(path: Path, title: str, icon: bytes, memsize: int = MEMSIZE):
         records.append(struct.pack('<HHIII', len(keys), kind, len(value), size, len(values)))
         keys.extend(key + b'\0')
         values.extend(value + bytes(size - len(value)))
-    if not found:
+    if title is not None and not found:
         raise ValueError('No TITLE in PARAM.SFO')
     if not memsize_found:
         raise ValueError('No MEMSIZE in PARAM.SFO')
@@ -58,7 +59,8 @@ def set_pbp_title(path: Path, title: str, icon: bytes, memsize: int = MEMSIZE):
     vs = (ks + len(keys) + 3) & ~3
     parts[0] = struct.pack('<5I', smagic, sversion, ks, vs, count) + b''.join(records) + keys + bytes(vs - ks - len(keys)) + values
     # ICON0.PNG (144x80) shown in the XMB; see scripts/make_icon.py.
-    parts[1] = icon
+    if icon is not None:
+        parts[1] = icon
     new_offsets, pos = [], 40
     for part in parts:
         new_offsets.append(pos)
@@ -81,6 +83,9 @@ def main():
         shutil.copy2(ROOT / 'config/profile.cfg', app / 'data/profile.cfg')
         set_pbp_title(app / 'EBOOT.PBP', 'komi-tube',
                       (ROOT / 'assets/ICON0.PNG').read_bytes())
+        # The launcher LoadExecs slot-a, and CFW sizes the partition from the
+        # EBOOT it starts, so the browser itself needs MEMSIZE=1 as well.
+        set_pbp_title(app / 'slot-a/EBOOT.PBP', None, None)
         (app / 'BUILD-INFO.json').write_text(json.dumps({
             'name': 'komi-tube',
             'engine': 'native PSP browser and media client',

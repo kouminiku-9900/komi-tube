@@ -12,7 +12,7 @@ git checkout claude/wonderful-cori-e21ml3   # 作業ブランチ（mainには未
 ```
 
 - ブランチは3コミットだけmainより先に進んでいる：調査EBOOT、その修正（v2）、実機結果の記録とMEMSIZE=1への変更。PRはまだ作っていない。
-- `./scripts/build.sh`（tilefinch版のフルビルド）はクラウドでは実行していない。`scripts/package.py`を変更したので、最初のビルドで通るか確認すること（下の「未確認」参照）。
+- `./scripts/build.sh`（tilefinch版のフルビルド）はローカルで通ることを確認済み（下の「未確認・注意点」参照）。
 
 ## ゴールと方針（ユーザーと合意済み）
 
@@ -72,7 +72,7 @@ ME専用領域は保険として低位に固定したままにする（低位に
 
 ## 未確認・注意点
 
-- `./scripts/build.sh`がMEMSIZEの書き換えで失敗しないか（`package.py`は元のSFOにMEMSIZEキーが無いとエラーにする。実機に入っていたEBOOTには値2で存在した）。PPSSPPでは、書き換えたEBOOTが拡張メモリを得ることを確認済み。
+- `./scripts/build.sh`はローカル（Mac）で通ることを確認済み（2026-09-24）。その際、ランチャーが`sctrlKernelLoadExecVSHMs2`で起動するブラウザ本体`slot-a/EBOOT.PBP`がMEMSIZE=2のままだったため、`package.py`でこちらも1に書き換えるよう修正した（CFWは起動するEBOOTのSFOで区画の大きさを決める）。この版をメモリースティックに入れ済み、実機未確認。
 - MEMSIZE=1にしたkomi-tubeで「検索→再生→関連→再生」が改善するか（HANDOFF.mdの未確認項目もまだ残っている）。
 - PPSSPPの限界：MEMSIZE=2は24MB扱い、`sceAudiocodecCheckNeedMem`はサイズを書かない（調査EBOOTは16KBとみなして続行する）、`mpeg_vsh`が無い（kubridgeも無い）、MEのメモリ制約を再現しない。デコードの成否は実機でしか分からない。
 - ビルドの注意：PSPのEBOOTで`-lpsputility -lpspnet_inet -lpspnet_resolver`をLIBSに書くと、ツールチェーンのspecsがlibcの後に同じライブラリを再度リンクし、importスタブが分断される（`psp-fixup-imports`が "stubs out of order" と警告する）。これらはspecsに任せ、LIBSに書かない（`native/memprobe/Makefile`参照）。
@@ -85,6 +85,9 @@ ME専用領域は保険として低位に固定したままにする（低位に
 - PSP側のPSPLink本体は [pspdev/psplinkusb](https://github.com/pspdev/psplinkusb) からビルドするか、配布物を使う。CFW 6.61で動くかは未確認。
 - 使い方の見込み：`usbhostfs_pc <dist のフォルダ>`でMacのフォルダを`host0:`として見せ、`pspsh`からEBOOTを起動する。ログを受け取り、スクリーンショットは`scrshot`コマンドで撮る。これでメモリースティックへのコピーが要らなくなる。
 - ボタンの遠隔操作と画面の転送が要るなら（段階3）RemoteJoyLite。自作のEBOOTは、試験の手順をスクリプト化して内蔵すれば、遠隔操作はほぼ要らない。
+- ローカルで確認したこと（2026-09-24）：`tools/pspdev/bin/`に`pspsh`と`usbhostfs_pc`（arm64）がある。ただし`usbhostfs_pc`は`/opt/homebrew/opt/libusb`にリンクしており、libusbが未導入なので`brew install libusb`が要る。メモリースティックに`PSP/GAME/PSPLINK`は無い。CFWはPRO/ME系（`SEPLUGINS`の内容から推定）。
+- tilefinch本体に実機自動化の一式がある：`vendor/tilefinch/docs/engineering/PSPLINK_DEV_LOOP.md`、`vendor/tilefinch/scripts/psplink-shell.sh`（`usbhostfs_pc`の起動と時間制限付きの`pspsh`実行）、`tools/psplink-loop`（EBOOTを直接`ld`できないCFW向けにLoadExecする小さなPRX）。PSP-3000＋ARK-4で使われていたもの。これを流用する。
+- 注意（同文書より）：PSPLink v3.2.1の`scrshot`はMEのファームウェア領域と重なるバッファを使うため、再生中に撮るとAVC/AACがタイムアウトする。再生中の画面はEBOOT自身で撮ること。
 - 目標は、ユーザーの作業を「USBでつなぐ → PSPでPSPLinkを起動する」だけにすること。以降の転送、起動、ログ回収、判定はClaude Codeが行う。
 
 PSPLinkが使えない場合は、今までどおり`./scripts/field_sync.sh install`でコピー → ユーザーが起動 → `./scripts/field_sync.sh collect`で回収。
