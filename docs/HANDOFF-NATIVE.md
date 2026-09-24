@@ -85,7 +85,11 @@ ME専用領域は保険として低位に固定したままにする（低位に
 - PSP側のPSPLink本体は [pspdev/psplinkusb](https://github.com/pspdev/psplinkusb) からビルドするか、配布物を使う。CFW 6.61で動くかは未確認。
 - 使い方の見込み：`usbhostfs_pc <dist のフォルダ>`でMacのフォルダを`host0:`として見せ、`pspsh`からEBOOTを起動する。ログを受け取り、スクリーンショットは`scrshot`コマンドで撮る。これでメモリースティックへのコピーが要らなくなる。
 - ボタンの遠隔操作と画面の転送が要るなら（段階3）RemoteJoyLite。自作のEBOOTは、試験の手順をスクリプト化して内蔵すれば、遠隔操作はほぼ要らない。
-- ローカルで確認したこと（2026-09-24）：`tools/pspdev/bin/`に`pspsh`と`usbhostfs_pc`（arm64）がある。ただし`usbhostfs_pc`は`/opt/homebrew/opt/libusb`にリンクしており、libusbが未導入なので`brew install libusb`が要る。メモリースティックに`PSP/GAME/PSPLINK`は無い。CFWはPRO/ME系（`SEPLUGINS`の内容から推定）。
+- ローカルで準備したこと（2026-09-24）：
+  - Mac：`brew install libusb`済み。`tools/pspdev/bin/`の`pspsh`と`usbhostfs_pc`がそのまま動く。
+  - PSP：PSPLink v3.2.1にtilefinchのパッチ2つ（HOMEでXMBへ戻る、再生中でも安全な`scrshot-user`）を当ててビルドし、`ms0:/PSP/GAME/PSPLINK/`に入れた。作り直すときは`git clone --branch v3.2.1 --depth 1 https://github.com/pspdev/psplinkusb.git <dir>`のあと`PSPDEV=$PWD/tools/pspdev vendor/tilefinch/scripts/build-psplink-home-exit.sh <dir> build/psplink`。
+  - `scripts/psplink.sh ready`／`scripts/psplink.sh exec '<pspshのコマンド>'`：tilefinchの`psplink-shell.sh`を呼ぶ薄い入口。`host0:`は`dist/`。PSP無しで`ready`を実行し、`usbhostfs_pc`が起動してPSPを待つところまで確認済み。
+  - CFWは**6.61 PRO-C**（ユーザー確認済み）。tilefinchはARK-4で使っていたので、PRO-CでPSPLinkが起動するか、EBOOTを`ld`できるか（ARK-4ではできず`tools/psplink-loop`のtfexec.prxでLoadExecしていた）はまだ試していない。
 - tilefinch本体に実機自動化の一式がある：`vendor/tilefinch/docs/engineering/PSPLINK_DEV_LOOP.md`、`vendor/tilefinch/scripts/psplink-shell.sh`（`usbhostfs_pc`の起動と時間制限付きの`pspsh`実行）、`tools/psplink-loop`（EBOOTを直接`ld`できないCFW向けにLoadExecする小さなPRX）。PSP-3000＋ARK-4で使われていたもの。これを流用する。
 - 注意（同文書より）：PSPLink v3.2.1の`scrshot`はMEのファームウェア領域と重なるバッファを使うため、再生中に撮るとAVC/AACがタイムアウトする。再生中の画面はEBOOT自身で撮ること。
 - 目標は、ユーザーの作業を「USBでつなぐ → PSPでPSPLinkを起動する」だけにすること。以降の転送、起動、ログ回収、判定はClaude Codeが行う。
