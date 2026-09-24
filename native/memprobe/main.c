@@ -40,7 +40,7 @@
 #ifndef MEMPROBE_VARIANT
 #define MEMPROBE_VARIANT "unknown"
 #endif
-#define MEMPROBE_VERSION 1
+#define MEMPROBE_VERSION 2
 
 PSP_MODULE_INFO("komi_memprobe", PSP_MODULE_USER, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
@@ -56,6 +56,12 @@ PSP_HEAP_SIZE_KB(1024);
 #define MAP_MAX 48
 #define PCM_BYTES (1024u * 2u * 2u)
 #define PCM_FILL 0xA5u
+/* PSP-3000 firmware 6.61 asks for 100744 bytes of AAC work memory, far more
+   than tilefinch's comment assumed (v1 capped it at 32 KiB and never ran
+   the decode). Leave room for twice that. */
+#define EDRAM_MAX (256u * 1024u)
+#define CARVE_BYTES (1024u + EDRAM_MAX + 8192u + PCM_BYTES + 64u)
+#define CARVE_SLOT (320u * 1024u)
 
 static char log_path[256];
 
@@ -168,14 +174,14 @@ typedef struct {
 
 static uint32_t align_up(uint32_t v, uint32_t a) { return (v + a - 1u) & ~(a - 1u); }
 
-/* Carve ctrl/edram/input/pcm out of [base, base+bytes). 64 KiB is plenty. */
+/* Carve ctrl/edram/input/pcm out of [base, base + CARVE_BYTES). */
 static void carve(CodecPlacement *p, uint32_t base)
 {
     base = align_up(base, 64u);
     p->ctrl = (unsigned long *) (uintptr_t) base;
     p->edram = (unsigned char *) (uintptr_t) (base + 1024u);
-    p->input = (unsigned char *) (uintptr_t) (base + 1024u + 32768u);
-    p->pcm = (unsigned char *) (uintptr_t) (base + 1024u + 32768u + 8192u);
+    p->input = (unsigned char *) (uintptr_t) (base + 1024u + EDRAM_MAX);
+    p->pcm = (unsigned char *) (uintptr_t) (base + 1024u + EDRAM_MAX + 8192u);
 }
 
 static CodecResult run_codec(const char *label, const CodecPlacement *p)
@@ -195,14 +201,14 @@ static CodecResult run_codec(const char *label, const CodecPlacement *p)
            with a generous size so the decode path still runs in emulation. */
         LOG("codec-note label=%s need=0 assumed=16384", label);
     }
-    if (status < 0 || ctrl[4] > 32768u) {
+    if (status < 0 || ctrl[4] > EDRAM_MAX) {
         LOG("codec-fail label=%s stage=CheckNeedMem status=0x%08X need=%u",
             label, (unsigned) status, r.edram_need);
         r.first_error = status;
         return r;
     }
-    memset(p->edram, 0, 32768u);
-    sceKernelDcacheWritebackInvalidateRange(p->edram, 32768u);
+    memset(p->edram, 0, EDRAM_MAX);
+    sceKernelDcacheWritebackInvalidateRange(p->edram, EDRAM_MAX);
     ctrl[3] = (unsigned long) (uintptr_t) p->edram;
     ctrl[10] = MEMPROBE_AAC_RATE;
     sceKernelDcacheWritebackInvalidateRange(ctrl, 320);
@@ -257,6 +263,49 @@ static int codec_verdict(const CodecResult *r, const CodecResult *reference)
        decoded and produced the same samples as the reference placement. */
     return r->ok == (int) MEMPROBE_AAC_FRAMES && r->pcm_changed > 0
         && (reference == NULL || r->checksum == reference->checksum);
+}
+
+/* Log the MEMSIZE the installed komi-tube EBOOT asks for, so the probe
+   result can be compared with what the app actually gets. */
+static void log_sibling_memsize(void)
+{
+    char path[256];
+    snprintf(path, sizeof path, "%s", log_path);
+    char *slash = strrchr(path, '/');
+    if (slash != NULL) *slash = '\0';
+    slash = strrchr(path, '/');
+    if (slash == NULL) return;
+    snprintf(slash + 1, sizeof path - (size_t) (slash + 1 - path), "KOMI_TUBE/EBOOT.PBP");
+    SceUID fd = sceIoOpen(path, PSP_O_RDONLY, 0);
+    if (fd < 0) {
+        LOG("komi-tube-eboot path=%s status=0x%08X", path, (unsigned) fd);
+        return;
+    }
+    static unsigned char buf[4096];
+    int n = sceIoRead(fd, buf, sizeof buf);
+    sceIoClose(fd);
+    uint32_t *head = (uint32_t *) buf;
+    int memsize = -1;
+    /* PBP: magic, version, then eight section offsets; PARAM.SFO is first. */
+    if (n >= 40 && head[0] == 0x50425000u && head[2] < head[3] && head[3] <= (uint32_t) n) {
+        const unsigned char *sfo = buf + head[2];
+        uint32_t sfo_len = head[3] - head[2];
+        const uint32_t *h = (const uint32_t *) sfo;
+        if (sfo_len >= 20 && h[0] == 0x46535000u) {
+            uint32_t keys = h[2], values = h[3], count = h[4];
+            for (uint32_t i = 0; i < count && 20u + 16u * (i + 1) <= sfo_len; i++) {
+                const unsigned char *e = sfo + 20 + 16 * i;
+                uint16_t key_off = (uint16_t) (e[0] | e[1] << 8);
+                uint32_t value_off = e[12] | e[13] << 8 | e[14] << 16 | (uint32_t) e[15] << 24;
+                if (keys + key_off + 8 <= sfo_len
+                    && memcmp(sfo + keys + key_off, "MEMSIZE", 8) == 0
+                    && values + value_off + 4 <= sfo_len) {
+                    memcpy(&memsize, sfo + values + value_off, 4);
+                }
+            }
+        }
+    }
+    LOG("komi-tube-eboot path=%s memsize=%d", path, memsize);
 }
 
 /* ---- boot plumbing ---- */
@@ -352,6 +401,7 @@ int main(int argc, char **argv)
         (unsigned) (uintptr_t) heap_marker);
     free(heap_marker);
 
+    log_sibling_memsize();
     snapshot("boot");
     map_partition("boot");
 
@@ -407,12 +457,12 @@ int main(int argc, char **argv)
     CodecPlacement low, high, mixed, vol;
     CodecResult r_low = { 0 }, r_vol = { 0 }, r_mixed = { 0 }, r_high = { 0 };
     int have_low = me_uid >= 0 && me_addr + me_size <= ME_LIMIT;
-    int have_high = arena_uid >= 0 && arena_end > ME_LIMIT + 131072u;
+    int have_high = arena_uid >= 0 && arena_end >= ME_LIMIT + 2u * CARVE_SLOT;
     int low_ok = 0, vol_ok = -1, mixed_ok = -1, high_ok = -1;
     if (have_low) {
         SHOW("ME test: low memory...");
         /* The tail of the ME region, leaving its 4 MiB-aligned head for DDR. */
-        carve(&low, me_addr + me_size - 65536u);
+        carve(&low, me_addr + me_size - CARVE_SLOT);
         r_low = run_codec("me-region", &low);
         low_ok = codec_verdict(&r_low, NULL);
     } else {
@@ -455,7 +505,7 @@ int main(int argc, char **argv)
            everything else is already on the card. */
         SHOW("ME test: high memory. If the screen stops here for 30 s,");
         SHOW("hold POWER to switch off; the log is already saved.");
-        carve(&high, arena_end - 65536u);
+        carve(&high, arena_end - CARVE_SLOT);
         mixed = low;
         mixed.input = high.input;
         mixed.pcm = high.pcm;

@@ -57,6 +57,8 @@ def summarize(path):
             info['codec'][f['label']] = f
         elif kind == 'volatile':
             info['volatile'] = f
+        elif kind == 'komi-tube-eboot':
+            info['komi_memsize'] = f.get('memsize', f.get('status'))
         elif kind == 'cycles':
             info['cycles'] = f
         elif kind in ('module', 'net'):
@@ -84,6 +86,8 @@ def report(info):
     if not info['complete']:
         out += [f"**Run did not finish.** Last line: `{info['last_line']}`", '']
     out.append(f"- devkit {info.get('devkit', '?')}, kuKernelGetModel {info.get('model', '?')}")
+    if 'komi_memsize' in info:
+        out.append(f"- installed komi-tube EBOOT MEMSIZE: {info['komi_memsize']} (-1 = key absent)")
     for label, (total, largest) in info['mem'].items():
         out.append(f'- free `{label}`: total {mb(total)}, largest {mb(largest)}')
     for label in ('boot', 'after-modules', 'after-layout'):

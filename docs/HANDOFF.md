@@ -47,6 +47,13 @@ python vendor/tilefinch/tests/test_psp_sdk_contracts.py vendor/tilefinch   # ソ
 ## ネイティブクライアントへの作り替え（2026-09-24〜）
 - 方針：tilefinch（ブラウザ）を使わないネイティブクライアントへ段階的に移行する。作業は本リポジトリのブランチで行い、tilefinch版のビルドと実機ログの手順をそのまま使う。
 - 段階0：メモリ調査用EBOOT `native/memprobe/`（`./scripts/build_memprobe.sh` → `dist/field-kit/PSP/GAME/KOMI_PROBE_M0/M1/M2`）。MEMSIZE別のユーザー領域、`0x0A000000`上下の空き、モジュール読み込み後の空き、ME専用6MB（4MB境界）とアリーナの配置、AACデコードによるMEの可視範囲、10回の開閉を1回の起動で記録する。PPSSPP headlessで3種類とも完走を確認済み。**実機未確認**。
+- **実機結果 v1（2026-09-24、PSP-3000 model=8/09g、FW 6.61、`docs/field-results/2026-09-24-memprobe-v1/`）**
+  - ユーザー領域：MEMSIZE=0と2は22.6MB（拡張なし）、**MEMSIZE=1だけ49.6MB**（`0x0A000000`より上に約26.7MB）。このCFWではMEMSIZE=2は拡張されない。
+  - モジュールの消費：avcodec 0、mpeg_vsh 約43KB、netモジュール 約432KB、sceNet初期化 約168KB（合計約644KB）。
+  - ME専用6MBは3種類とも`0x08C00000-0x09200000`（4MB境界）に確保できた。MEMSIZE=1でのアリーナは`0x09300000-0x0BA80000`（39.5MB、うち26.5MBが拡張領域）。
+  - 揮発メモリ（`0x08400000`、4MB）はユーザーモードからロックできた。
+  - AAC作業領域は`CheckNeedMem`で**100744バイト**を要求（tilefinchのプールは64KB想定）。v1は32KBを上限にしていたためMEの試験が実行されず、全項目FAILはこのためで、MEの可否は未確定。v2で上限256KBに修正。
+  - 残り：v2を1回実行してMEの可視範囲を確定する。installed komi-tube EBOOTのMEMSIZEもv2のログに出る（2なら今のkomi-tubeは実機で拡張メモリを使えていない）。
 - 実機テストは持ち出しを減らすため1回にまとめる：`docs/FIELD-TEST.md`。`./scripts/field_sync.sh install|collect` でコピーと回収、`scripts/memprobe_report.py` で表にする。
 - Linuxでもビルドできる：pspdevのUbuntu版（`pspdev-ubuntu-latest-x86_64.tar.gz`、sources.lock.jsonと同じv20260901）を展開し、`PSPDEV=<展開先>/pspdev ./scripts/build_memprobe.sh`。
 
